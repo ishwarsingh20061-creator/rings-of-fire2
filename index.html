@@ -30,6 +30,7 @@
         
         // Firebase Modular SDKs
         import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js';
+        import { getAnalytics } from 'https://www.gstatic.com/firebasejs/10.13.0/firebase-analytics.js';
         import { 
             getAuth, 
             signInAnonymously, 
@@ -54,48 +55,43 @@
             Trophy, Gamepad2, Users, Calendar, CheckCircle, Plus, Trash2, 
             LogOut, Shield, User, X, Lock, Key, Edit3, Crosshair, Award, 
             History, Zap, QrCode, AlertTriangle, Check, RefreshCcw, Flame, 
-            Timer, AlertOctagon, Menu 
+            Timer, AlertOctagon, Menu, Info
         } from 'https://esm.sh/lucide-react@0.292.0';
 
-        // --- Firebase Initialization (Environment Aware) ---
-        const getFirebaseConfig = () => {
-          if (typeof __firebase_config !== 'undefined') {
-            return JSON.parse(__firebase_config);
-          }
-          // Fallback for local testing only
-          return {
-            apiKey: "AIzaSyDiIZISGQKAIXJrsWeHWrowX3ye39xu6gw",
-            authDomain: "rings-of-fire-f885d.firebaseapp.com",
-            projectId: "rings-of-fire-f885d",
-            storageBucket: "rings-of-fire-f885d.firebasestorage.app",
-            messagingSenderId: "51844505868",
-            appId: "1:51844505868:web:c248b3708527e14cf06929",
-            measurementId: "G-1NHXN6NCQ1"
-          };
+        // --- YOUR FIREBASE CONFIGURATION ---
+        const firebaseConfig = {
+            apiKey: "AIzaSyAZvhEfLUl5XaSnMzjjzKMQwz2q5hnf3Cs",
+            authDomain: "rings-of-fire-88ded.firebaseapp.com",
+            projectId: "rings-of-fire-88ded",
+            storageBucket: "rings-of-fire-88ded.firebasestorage.app",
+            messagingSenderId: "85415859486",
+            appId: "1:85415859486:web:7098de9f1f247ec79ba50f",
+            measurementId: "G-0PBV3C58ED"
         };
 
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const firebaseConfig = getFirebaseConfig();
-
         // Initialize Firebase safely
-        let app, auth, db;
+        let app, auth, db, analytics;
         try {
           app = initializeApp(firebaseConfig);
+          analytics = getAnalytics(app);
           auth = getAuth(app);
           db = getFirestore(app);
+          console.log("Firebase Initialized Successfully");
         } catch (error) {
           console.error("Firebase Initialization Error:", error);
+          alert("Database Connection Failed: " + error.message);
         }
 
         // --- Helper for Firestore Paths ---
+        // We use a simple collection path 'tournaments' directly in your project
         const getTournamentCollection = () => {
           if (!db) return null;
-          return collection(db, 'artifacts', appId, 'public', 'data', 'tournaments');
+          return collection(db, 'tournaments');
         };
 
         const getTournamentDoc = (id) => {
           if (!db) return null;
-          return doc(db, 'artifacts', appId, 'public', 'data', 'tournaments', id);
+          return doc(db, 'tournaments', id);
         };
 
         // --- Custom CSS for Animations ---
@@ -289,43 +285,48 @@
 
           useEffect(() => {
             if (!auth) {
-              console.warn("Firebase Auth not initialized. Using Mock User.");
-              setTimeout(() => {
-                setUser({ uid: 'mock_user_123', isGuest: true });
-                setLoading(false);
-              }, 1000);
+              // If Firebase failed to load entirely
+              setAuthError("Critical Error: Firebase not loaded.");
+              setLoading(false);
               return;
             }
 
             const initAuth = async () => {
               try {
-                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                  await signInWithCustomToken(auth, __initial_auth_token);
-                } else {
+                  // Attempt Anonymous Login
                   await signInAnonymously(auth);
-                }
               } catch (err) {
                 console.error("Auth failed:", err);
-                setAuthError("Connection failed. Playing in offline mode.");
-                setUser({ uid: 'guest_offline', isGuest: true });
+                // Handle specific Firebase setup errors
+                if (err.code === 'auth/configuration-not-found' || err.code === 'auth/operation-not-allowed') {
+                    setAuthError("SETUP REQUIRED: Go to Firebase Console -> Authentication and enable 'Anonymous' sign-in.");
+                } else {
+                    setAuthError(`Connection failed: ${err.code}. Check your database setup.`);
+                }
+                // Fallback to an offline guest user so the app UI still loads
+                setUser({ uid: 'offline_guest', isAnonymous: true });
                 setLoading(false);
               }
             };
 
-            initAuth();
-
+            // Listen for auth state changes
             const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
               if (currentUser) {
                 setUser(currentUser);
                 setAuthError(null);
+                console.log("User authenticated:", currentUser.uid);
               }
               setLoading(false);
             });
+
+            initAuth();
             return () => unsubscribe();
           }, []);
 
           // Data Fetching
           useEffect(() => {
+            // If we are in offline mode, we might not want to query, but let's try 
+            // just in case public read is allowed.
             if (!user || !db) return;
 
             try {
@@ -348,6 +349,10 @@
                 setTournaments(data);
               }, (error) => {
                 console.error("Error fetching tournaments:", error);
+                if (error.code === 'permission-denied') {
+                    // Only show if we haven't already shown a major auth error
+                    if (!authError) showNotification('Database Permission Denied', 'error');
+                }
                 setTournaments([]); 
               });
 
@@ -355,7 +360,7 @@
             } catch (e) {
               console.error("Firestore Error", e);
             }
-          }, [user]);
+          }, [user, authError]);
 
           const showNotification = (message, type = 'success') => {
             setNotification({ message, type });
@@ -366,7 +371,7 @@
             return (
               <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-cyan-500 gap-4">
                 <div className="animate-spin"><Gamepad2 size={48} /></div>
-                <div className="text-xs font-mono animate-pulse">CONNECTING...</div>
+                <div className="text-xs font-mono animate-pulse">CONNECTING TO SERVER...</div>
               </div>
             );
           }
@@ -424,7 +429,7 @@
 
               <main className="max-w-7xl mx-auto px-4 py-6 md:py-10 relative z-10">
                 {!role ? (
-                  <RoleSelection onSelect={setRole} showNotification={showNotification} />
+                  <RoleSelection onSelect={setRole} showNotification={showNotification} authError={authError} />
                 ) : role === 'admin' ? (
                   <AdminPanel 
                     tournaments={tournaments} 
@@ -444,11 +449,18 @@
         }
 
         // --- Role Selection ---
-        function RoleSelection({ onSelect, showNotification }) {
+        function RoleSelection({ onSelect, showNotification, authError }) {
           const [showLogin, setShowLogin] = useState(false);
 
           return (
             <div className="flex flex-col items-center justify-center py-4 min-h-[60vh]">
+              {authError && (
+                  <div className="mb-6 bg-red-500/20 border border-red-500 text-red-200 px-4 py-3 rounded-lg flex items-center gap-2 text-sm font-bold animate-pulse max-w-lg mx-auto text-center">
+                      <AlertTriangle size={20} className="shrink-0" /> 
+                      <span>{authError}</span>
+                  </div>
+              )}
+            
               {showLogin && (
                 <AdminLoginModal 
                   onClose={() => setShowLogin(false)} 
@@ -515,6 +527,7 @@
 
           const handleLogin = (e) => {
             e.preventDefault();
+            // --- HARDCODED ADMIN CREDENTIALS ---
             if (creds.id === 'blackboom172' && creds.password === '1517') {
               showNotification('Access Granted. Welcome back, Organizer.');
               onLogin();
