@@ -34,11 +34,11 @@
         import { 
             getAuth, 
             signInAnonymously, 
-            signInWithCustomToken,
+            signInWithCustomToken, 
+            onAuthStateChanged,
             createUserWithEmailAndPassword,
             signInWithEmailAndPassword,
-            signOut,
-            onAuthStateChanged 
+            signOut
         } from 'https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js';
         import { 
             getFirestore, 
@@ -62,7 +62,7 @@
             Timer, AlertOctagon, Menu, Info, Pause, PlayCircle, Wallet, 
             CreditCard, Smartphone, ShieldCheck, Loader2, ChevronRight,
             Megaphone, ScrollText, List, Coins, Save, MinusCircle, Pencil,
-            Instagram, Mail, LogIn, UserPlus
+            Instagram, Mail, LogIn, UserPlus, Bell
         } from 'https://esm.sh/lucide-react@0.292.0';
 
         // --- GLOBAL VARIABLES ---
@@ -549,7 +549,8 @@
           const [formData, setFormData] = useState({ 
               game: 'Free Fire', format: 'Solo', title: '', map: 'Bermuda', date: '', time: '', 
               entryFee: 0, prizePool: 0, totalSlots: 48,
-              rules: DEFAULT_RULES 
+              rules: DEFAULT_RULES,
+              announcement: ''
           });
 
           const handleSubmit = async (e) => {
@@ -653,6 +654,7 @@
                 prizePool: data.prizePool,
                 totalSlots: data.totalSlots,
                 rules: data.rules || DEFAULT_RULES, // Load existing rules or default
+                announcement: data.announcement || '',
                 date: dateStr,
                 time: timeStr
             });
@@ -674,6 +676,7 @@
                       prizePool: Number(editForm.prizePool),
                       totalSlots: Number(editForm.totalSlots),
                       rules: editForm.rules, // Save updated rules
+                      announcement: editForm.announcement,
                       dateTime: dateTime.toISOString()
                   });
                   setIsEditingDetails(false);
@@ -708,6 +711,17 @@
                             onChange={e=>setEditForm({...editForm, rules:e.target.value})} 
                             placeholder="Rules" 
                         />
+                        
+                        {/* Notice Board Field */}
+                        <div>
+                            <label className="block text-slate-400 text-xs font-bold mb-1">Match Notice (Visible to Players)</label>
+                            <input 
+                                className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-white text-sm" 
+                                value={editForm.announcement} 
+                                onChange={e=>setEditForm({...editForm, announcement:e.target.value})} 
+                                placeholder="e.g. Room ID delayed by 10 mins" 
+                            />
+                        </div>
 
                         <div className="flex gap-2 justify-end pt-2">
                             <button type="button" onClick={()=>setIsEditingDetails(false)} className="px-4 py-2 text-sm text-slate-400 hover:text-white">Cancel</button>
@@ -807,6 +821,15 @@
                         {activeTab === 'overview' && (
                             <div className="animate-fade-in space-y-4">
                                 <div className="grid grid-cols-2 gap-2 md:gap-3"><div className="bg-slate-900/40 p-2 rounded"><Calendar size={12}/> {formatDate(t.dateTime)} • {formatTime(t.dateTime)}</div><div className="bg-slate-900/40 p-2 rounded flex gap-1"><Timer size={12}/> <CountdownTimer targetDate={t.dateTime}/></div></div>
+                                
+                                {/* Notice Board */}
+                                {t.announcement && (
+                                    <div className="bg-orange-500/10 border-b border-orange-500/20 p-3 flex items-start gap-2 rounded-lg">
+                                        <Megaphone size={14} className="text-orange-400 mt-0.5 shrink-0 animate-bounce"/>
+                                        <p className="text-orange-200 text-xs font-medium">{t.announcement}</p>
+                                    </div>
+                                )}
+
                                 <div>
                                     <div className="flex justify-between text-[10px] font-bold mb-1.5"><span className="text-slate-500 uppercase">Registration</span><span className={isFull ? "text-red-400 animate-pulse" : "text-cyan-400"}>{slotsLeft} Slots Left</span></div>
                                     <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden"><div className={`h-full transition-all duration-500 ${isFull ? 'bg-red-500' : 'bg-gradient-to-r from-cyan-500 to-blue-500'}`} style={{ width: `${percentFilled}%` }}></div></div>
