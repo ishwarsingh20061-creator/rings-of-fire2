@@ -909,8 +909,19 @@
 
         function PlayerPanel({ tournaments, showNotification, userId }) {
           const [view, setView] = useState('home');
+          const [filter, setFilter] = useState('All'); // New state for game filter
           const [selected, setSelected] = useState(null);
+          
           const champion = useMemo(() => { const comp = tournaments.filter(t => t.status === 'completed' && t.winner); return comp.length ? comp.sort((a, b) => new Date(b.dateTime) - new Date(a.dateTime))[0] : null; }, [tournaments]);
+          
+          // Filter logic
+          const filteredTournaments = useMemo(() => {
+              if (filter === 'All') return tournaments;
+              return tournaments.filter(t => t.game === filter);
+          }, [tournaments, filter]);
+
+          const gameTypes = ['All', 'Free Fire', 'PUBG Mobile', 'BGMI', 'COD Mobile'];
+
           return (
             <div>
               {view === 'home' && champion && (
@@ -932,15 +943,39 @@
                     </a>
                 </div>
               </div>
+              
               {view === 'profile' ? <PlayerProfile userId={userId} tournaments={tournaments} /> : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6 animate-fade-in-up">
-                  {tournaments.map(t => {
-                      const joined = t.participants?.find(p => p.userId === userId);
-                      const verified = joined?.paymentVerified;
-                      const filled = t.filledSlots || 0; const total = t.totalSlots || 1; const slotsLeft = Math.max(0, total - filled); const percentFilled = Math.min(100, (filled / total) * 100); const isFull = slotsLeft === 0;
-                      return <PlayerTournamentCard key={t.id} t={t} joined={joined} verified={verified} slotsLeft={slotsLeft} percentFilled={percentFilled} isFull={isFull} setSelected={setSelected} />;
-                  })}
-                </div>
+                <>
+                    {/* Game Filters UI */}
+                    <div className="flex gap-2 overflow-x-auto pb-2 mb-6 custom-scrollbar">
+                        {gameTypes.map(game => (
+                            <button 
+                                key={game}
+                                onClick={() => setFilter(game)}
+                                className={`px-4 py-2 rounded-full text-xs font-bold whitespace-nowrap transition-all ${
+                                    filter === game 
+                                    ? 'bg-gradient-to-r from-cyan-600 to-blue-600 text-white shadow-lg shadow-cyan-500/20 scale-105' 
+                                    : 'bg-slate-800/50 text-slate-400 border border-slate-700 hover:border-slate-500 hover:text-white'
+                                }`}
+                            >
+                                {game}
+                            </button>
+                        ))}
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6 animate-fade-in-up">
+                    {filteredTournaments.length === 0 ? (
+                        <div className="col-span-full text-center py-12 text-slate-500 font-medium">No tournaments found for {filter}.</div>
+                    ) : (
+                        filteredTournaments.map(t => {
+                            const joined = t.participants?.find(p => p.userId === userId);
+                            const verified = joined?.paymentVerified;
+                            const filled = t.filledSlots || 0; const total = t.totalSlots || 1; const slotsLeft = Math.max(0, total - filled); const percentFilled = Math.min(100, (filled / total) * 100); const isFull = slotsLeft === 0;
+                            return <PlayerTournamentCard key={t.id} t={t} joined={joined} verified={verified} slotsLeft={slotsLeft} percentFilled={percentFilled} isFull={isFull} setSelected={setSelected} />;
+                        })
+                    )}
+                    </div>
+                </>
               )}
               {selected && <PaymentModal tournament={selected} onClose={()=>setSelected(null)} userId={userId} showNotification={showNotification} />}
             </div>
