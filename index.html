@@ -34,7 +34,10 @@
         import { 
             getAuth, 
             signInAnonymously, 
-            signInWithCustomToken, 
+            signInWithCustomToken,
+            createUserWithEmailAndPassword,
+            signInWithEmailAndPassword,
+            signOut,
             onAuthStateChanged 
         } from 'https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js';
         import { 
@@ -58,12 +61,13 @@
             History, Zap, QrCode, AlertTriangle, Check, RefreshCcw, Flame, 
             Timer, AlertOctagon, Menu, Info, Pause, PlayCircle, Wallet, 
             CreditCard, Smartphone, ShieldCheck, Loader2, ChevronRight,
-            Megaphone, ScrollText, List, Coins, Save, MinusCircle
+            Megaphone, ScrollText, List, Coins, Save, MinusCircle, Pencil,
+            Instagram, Mail, LogIn, UserPlus
         } from 'https://esm.sh/lucide-react@0.292.0';
 
         // --- GLOBAL VARIABLES ---
         let app, analytics, auth, db;
-        let initError = null; // Declared at top level to avoid ReferenceError
+        let initError = null; 
 
         // --- FIREBASE INITIALIZATION (Production Config) ---
         const firebaseConfig = {
@@ -101,6 +105,15 @@
         const getSettingsDoc = (docName) => {
             if (!db) return null;
             return doc(db, 'appSettings', docName);
+        };
+
+        // --- Helper Functions ---
+        const formatDate = (isoString) => {
+            return new Date(isoString).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+        };
+
+        const formatTime = (isoString) => {
+            return new Date(isoString).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true });
         };
 
         // --- Custom CSS ---
@@ -194,7 +207,6 @@
         };
 
         // --- Main Component ---
-        // We accept initError as a prop to be safe, although global scope is also used
         function App({ initialError }) {
           const [user, setUser] = useState(null);
           const [role, setRole] = useState(null);
@@ -207,36 +219,25 @@
           useEffect(() => {
             if (!app) {
                 setLoading(false);
-                // Only set error if we haven't already passed one in
                 if (!authError) setAuthError("Critical: Firebase Init Failed");
                 return;
             }
 
-            const initAuth = async () => {
-              try {
-                await signInAnonymously(auth);
-              } catch (err) {
-                console.error("Auth failed:", err);
-                if (err.code === 'auth/configuration-not-found' || err.code === 'auth/operation-not-allowed') { 
-                    setAuthError("SETUP REQUIRED: Enable 'Anonymous' Sign-in in Firebase Console -> Authentication."); 
-                } else if (err.code === 'auth/api-key-not-valid') {
-                    setAuthError("CONFIG ERROR: Your API Key is invalid. Check index.html");
-                } else { 
-                    setAuthError(`Connection failed: ${err.code}.`); 
+            // We only init auth listener, no auto-login for players anymore to support Login Screen
+            const unsubscribe = onAuthStateChanged(auth, (u) => { 
+                setUser(u); 
+                if (u) {
+                   setAuthError(null); 
                 }
-                setUser({ uid: 'offline_guest', isAnonymous: true }); 
-                setLoading(false);
-              }
-            };
-            const unsubscribe = onAuthStateChanged(auth, (u) => { if (u) { setUser(u); setAuthError(null); } setLoading(false); });
-            initAuth(); return () => unsubscribe();
+                setLoading(false); 
+            });
+            return () => unsubscribe();
           }, []);
 
           // Data Fetching
           useEffect(() => {
             if (!user || !db) return;
             try {
-              // Fetch Tournaments
               const tournamentsRef = getTournamentCollection();
               if (tournamentsRef) {
                   onSnapshot(tournamentsRef, (snapshot) => {
@@ -254,7 +255,6 @@
                   });
               }
 
-              // Fetch News
               const newsDoc = getSettingsDoc('news');
               if (newsDoc) {
                   onSnapshot(newsDoc, (doc) => {
@@ -268,6 +268,14 @@
           }, [user]);
 
           const showNotification = (message, type = 'success') => { setNotification({ message, type }); setTimeout(() => setNotification(null), 3000); };
+
+          // Simple Log Out function
+          const handleLogout = () => {
+              signOut(auth).then(() => {
+                  setRole(null);
+                  showNotification("Logged Out Successfully");
+              });
+          };
 
           if (authError) {
               return (
@@ -306,7 +314,7 @@
                   
                   {role ? (
                     <div className="flex items-center gap-3">
-                      <button onClick={() => setRole(null)} className="text-xs md:text-sm text-slate-400 hover:text-white flex items-center gap-1 md:gap-2 px-3 py-2 rounded-lg hover:bg-white/5 transition-colors border border-transparent hover:border-white/10">
+                      <button onClick={handleLogout} className="text-xs md:text-sm text-slate-400 hover:text-white flex items-center gap-1 md:gap-2 px-3 py-2 rounded-lg hover:bg-white/5 transition-colors border border-transparent hover:border-white/10">
                         <LogOut size={14} /><span className="hidden md:inline">Exit</span>
                       </button>
                     </div>
@@ -318,9 +326,9 @@
                 {!role ? (
                   <RoleSelection onSelect={setRole} showNotification={showNotification} authError={authError} />
                 ) : role === 'admin' ? (
-                  <AdminPanel tournaments={tournaments} showNotification={showNotification} userId={user.uid} news={news} />
+                  <AdminPanel tournaments={tournaments} showNotification={showNotification} userId={user?.uid} news={news} />
                 ) : (
-                  <PlayerPanel tournaments={tournaments} showNotification={showNotification} userId={user.uid} />
+                  <PlayerPanel tournaments={tournaments} showNotification={showNotification} userId={user?.uid} />
                 )}
               </main>
             </div>
@@ -329,11 +337,16 @@
 
         // --- Role Selection & Login ---
         function RoleSelection({ onSelect, showNotification, authError }) {
-          const [showLogin, setShowLogin] = useState(false);
+          const [showAdminLogin, setShowAdminLogin] = useState(false);
+          const [showPlayerAuth, setShowPlayerAuth] = useState(false);
+
           return (
             <div className="flex flex-col items-center justify-center py-4 min-h-[60vh]">
               {authError && <div className="mb-6 bg-red-500/20 border border-red-500 text-red-200 px-4 py-3 rounded-lg flex items-center gap-2 text-sm font-bold animate-pulse max-w-lg mx-auto text-center"><AlertTriangle size={20} className="shrink-0" /><span>{authError}</span></div>}
-              {showLogin && <AdminLoginModal onClose={() => setShowLogin(false)} onLogin={() => onSelect('admin')} showNotification={showNotification} />}
+              
+              {showAdminLogin && <AdminLoginModal onClose={() => setShowAdminLogin(false)} onLogin={() => onSelect('admin')} showNotification={showNotification} />}
+              {showPlayerAuth && <PlayerAuthModal onClose={() => setShowPlayerAuth(false)} onLogin={() => onSelect('player')} showNotification={showNotification} />}
+
               <div className="text-center mb-10 md:mb-16 animate-fade-in relative px-2">
                 <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-48 h-48 md:w-64 md:h-64 bg-cyan-500/20 blur-[60px] md:blur-[80px] rounded-full pointer-events-none"></div>
                 <div className="inline-block mb-2 md:mb-4 relative"><Flame size={50} className="md:w-20 md:h-20 text-cyan-500 animate-pulse absolute blur-xl opacity-50"/><Flame size={50} className="md:w-20 md:h-20 text-cyan-500 relative z-10"/></div>
@@ -341,14 +354,77 @@
                 <p className="text-slate-400 text-sm md:text-xl max-w-xs md:max-w-lg mx-auto font-light relative z-10">Step into the fire. Compete for glory, honor, and rewards.</p>
               </div>
               <div className="grid md:grid-cols-2 gap-4 md:gap-8 w-full max-w-4xl relative z-10">
-                <button onClick={() => onSelect('player')} className="group relative overflow-hidden glass-card p-6 md:p-10 rounded-2xl md:rounded-3xl text-left h-48 md:h-72 flex flex-col justify-end hover:border-cyan-500/50 active:scale-95 transition-all">
+                <button onClick={() => setShowPlayerAuth(true)} className="group relative overflow-hidden glass-card p-6 md:p-10 rounded-2xl md:rounded-3xl text-left h-48 md:h-72 flex flex-col justify-end hover:border-cyan-500/50 active:scale-95 transition-all">
                   <div className="absolute top-0 right-0 p-6 opacity-10 group-hover:opacity-25 transition-all duration-500 group-hover:scale-110 group-hover:rotate-12"><Gamepad2 size={120} className="md:w-[200px] md:h-[200px]" /></div>
                   <div className="relative z-10"><div className="bg-cyan-500/20 w-10 h-10 md:w-16 md:h-16 rounded-xl md:rounded-2xl flex items-center justify-center mb-3 md:mb-6 text-cyan-400 group-hover:scale-110 transition-transform duration-300 border border-cyan-500/30 shadow-lg shadow-cyan-500/10"><Crosshair size={20} className="md:w-8 md:h-8" /></div><h3 className="text-2xl md:text-3xl font-bold text-white mb-1 md:mb-2 group-hover:text-cyan-400 transition-colors">Player Zone</h3><p className="text-slate-400 text-xs md:text-base group-hover:text-slate-300 transition-colors font-medium">Join matches, form squads, and verify your skills.</p></div>
                 </button>
-                <button onClick={() => setShowLogin(true)} className="group relative overflow-hidden glass-card p-6 md:p-10 rounded-2xl md:rounded-3xl text-left h-48 md:h-72 flex flex-col justify-end hover:border-violet-500/50 active:scale-95 transition-all">
+                <button onClick={() => setShowAdminLogin(true)} className="group relative overflow-hidden glass-card p-6 md:p-10 rounded-2xl md:rounded-3xl text-left h-48 md:h-72 flex flex-col justify-end hover:border-violet-500/50 active:scale-95 transition-all">
                   <div className="absolute top-0 right-0 p-6 opacity-10 group-hover:opacity-25 transition-all duration-500 group-hover:scale-110 group-hover:-rotate-12"><Shield size={120} className="md:w-[200px] md:h-[200px]" /></div>
                   <div className="relative z-10"><div className="bg-violet-500/20 w-10 h-10 md:w-16 md:h-16 rounded-xl md:rounded-2xl flex items-center justify-center mb-3 md:mb-6 text-violet-400 group-hover:scale-110 transition-transform duration-300 border border-violet-500/30 shadow-lg shadow-violet-500/10"><Lock size={20} className="md:w-8 md:h-8" /></div><h3 className="text-2xl md:text-3xl font-bold text-white mb-1 md:mb-2 group-hover:text-violet-400 transition-colors">Organizer Zone</h3><p className="text-slate-400 text-xs md:text-base group-hover:text-slate-300 transition-colors font-medium">Manage the ring, set the prizes, and declare champions.</p></div>
                 </button>
+              </div>
+            </div>
+          );
+        }
+
+        // --- NEW: Player Auth Modal (Login/Signup) ---
+        function PlayerAuthModal({ onClose, onLogin, showNotification }) {
+          const [isSignUp, setIsSignUp] = useState(false);
+          const [email, setEmail] = useState('');
+          const [password, setPassword] = useState('');
+          const [loading, setLoading] = useState(false);
+          const [error, setError] = useState('');
+
+          const handleAuth = async (e) => {
+            e.preventDefault();
+            setLoading(true);
+            setError('');
+            try {
+                if (isSignUp) {
+                    await createUserWithEmailAndPassword(auth, email, password);
+                    showNotification("Account Created! Welcome, Player.");
+                } else {
+                    await signInWithEmailAndPassword(auth, email, password);
+                    showNotification("Welcome back, Champion.");
+                }
+                onLogin();
+            } catch (err) {
+                console.error(err);
+                let msg = "Authentication Failed";
+                if (err.code === 'auth/invalid-credential' || err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password') msg = "Invalid Email or Password";
+                if (err.code === 'auth/email-already-in-use') msg = "Email already in use";
+                if (err.code === 'auth/weak-password') msg = "Password too weak (min 6 chars)";
+                setError(msg);
+            } finally {
+                setLoading(false);
+            }
+          };
+
+          return (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md animate-fade-in">
+              <div className="glass-panel p-6 md:p-8 rounded-2xl shadow-2xl w-full max-w-sm relative border border-slate-700">
+                <button onClick={onClose} className="absolute top-4 right-4 text-slate-500 hover:text-white"><X size={20}/></button>
+                <div className="text-center mb-6 md:mb-8">
+                  <div className="w-12 h-12 md:w-16 md:h-16 bg-gradient-to-br from-cyan-500 to-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-cyan-500/20 ring-4 ring-cyan-500/10">
+                    <Gamepad2 size={24} className="md:w-8 md:h-8 text-white" />
+                  </div>
+                  <h3 className="text-lg md:text-xl font-bold text-white">Player Access</h3>
+                  <p className="text-slate-400 text-xs mt-1">{isSignUp ? "Join the League" : "Continue your Legacy"}</p>
+                </div>
+                <form onSubmit={handleAuth} className="space-y-3 md:space-y-4">
+                  <div><div className="relative group"><Mail size={18} className="absolute left-3.5 top-3.5 text-slate-500 group-focus-within:text-cyan-500 transition-colors" /><input type="email" placeholder="Email Address" className="w-full bg-slate-900/50 border border-slate-700 rounded-xl pl-11 pr-4 py-3 text-white focus:border-cyan-500 outline-none transition-all placeholder:text-slate-600 text-sm" value={email} onChange={e => setEmail(e.target.value)} required /></div></div>
+                  <div><div className="relative group"><Key size={18} className="absolute left-3.5 top-3.5 text-slate-500 group-focus-within:text-cyan-500 transition-colors" /><input type="password" placeholder="Password" className="w-full bg-slate-900/50 border border-slate-700 rounded-xl pl-11 pr-4 py-3 text-white focus:border-cyan-500 outline-none transition-all placeholder:text-slate-600 text-sm" value={password} onChange={e => setPassword(e.target.value)} required /></div></div>
+                  {error && <div className="text-red-400 text-xs text-center font-bold bg-red-500/10 py-2.5 rounded-lg border border-red-500/20 animate-pulse">{error}</div>}
+                  <button disabled={loading} type="submit" className="w-full bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold py-3 md:py-3.5 rounded-xl shadow-lg shadow-cyan-500/20 transition-all hover:scale-[1.02] active:scale-[0.98] mt-2 text-sm md:text-base flex items-center justify-center gap-2">
+                    {loading ? <Loader2 size={18} className="animate-spin"/> : (isSignUp ? <UserPlus size={18}/> : <LogIn size={18}/>)}
+                    {isSignUp ? 'Create Account' : 'Login'}
+                  </button>
+                </form>
+                <div className="mt-4 text-center">
+                    <button onClick={() => setIsSignUp(!isSignUp)} className="text-xs text-slate-400 hover:text-cyan-400 transition-colors">
+                        {isSignUp ? "Already have an account? Login" : "New here? Create Account"}
+                    </button>
+                </div>
               </div>
             </div>
           );
@@ -466,9 +542,16 @@
           );
         }
 
+        const DEFAULT_RULES = "1. Teaming with other squads results in immediate DQ.\n2. Hackers will be permanently banned.\n3. Room ID/Pass shared 10 mins before start.\n4. Screenshot your result for disputes.";
+
         function CreateTournamentForm({ onComplete, userId, showNotification }) {
           const [loading, setLoading] = useState(false);
-          const [formData, setFormData] = useState({ game: 'Free Fire', format: 'Solo', title: '', map: 'Bermuda', date: '', time: '', entryFee: 0, prizePool: 0, totalSlots: 48 });
+          const [formData, setFormData] = useState({ 
+              game: 'Free Fire', format: 'Solo', title: '', map: 'Bermuda', date: '', time: '', 
+              entryFee: 0, prizePool: 0, totalSlots: 48,
+              rules: DEFAULT_RULES 
+          });
+
           const handleSubmit = async (e) => {
             e.preventDefault(); setLoading(true);
             try {
@@ -477,10 +560,26 @@
               if (isNaN(dateTime.getTime())) throw new Error("Invalid date format.");
               const collectionRef = getTournamentCollection();
               if (!collectionRef) throw new Error("Database not ready.");
-              await addDoc(collectionRef, { ...formData, entryFee: Number(formData.entryFee), prizePool: Number(formData.prizePool), totalSlots: Number(formData.totalSlots), filledSlots: 0, participants: [], hostId: userId || 'unknown', roomId: '', roomPassword: '', status: 'upcoming', registrationOpen: true, winner: '', createdAt: serverTimestamp(), dateTime: dateTime.toISOString() });
+              await addDoc(collectionRef, { 
+                  ...formData, 
+                  entryFee: Number(formData.entryFee), 
+                  prizePool: Number(formData.prizePool), 
+                  totalSlots: Number(formData.totalSlots), 
+                  filledSlots: 0, 
+                  participants: [], 
+                  hostId: userId || 'unknown', 
+                  roomId: '', 
+                  roomPassword: '', 
+                  status: 'upcoming', 
+                  registrationOpen: true, 
+                  winner: '', 
+                  createdAt: serverTimestamp(), 
+                  dateTime: dateTime.toISOString() 
+              });
               onComplete();
             } catch (error) { console.error(error); showNotification(error.message || "Failed", "error"); } finally { setLoading(false); }
           };
+
           return (
             <div className="glass-panel p-6 md:p-8 rounded-2xl border border-slate-700 max-w-3xl mx-auto animate-fade-in-up">
               <div className="mb-6 md:mb-8 pb-4 md:pb-6 border-b border-slate-700/50"><h3 className="text-lg md:text-xl font-bold text-white flex items-center gap-2"><Zap size={20} className="text-cyan-400"/> New Tournament</h3></div>
@@ -499,6 +598,18 @@
                     <input required type="number" className="w-full bg-slate-900/50 border border-slate-700 rounded-xl px-3 py-3 text-white focus:border-cyan-500 outline-none text-sm" placeholder="Prize" value={formData.prizePool} onChange={e => setFormData({...formData, prizePool: e.target.value})} />
                     <input required type="number" className="w-full bg-slate-900/50 border border-slate-700 rounded-xl px-3 py-3 text-white focus:border-cyan-500 outline-none text-sm" placeholder="Slots" value={formData.totalSlots} onChange={e => setFormData({...formData, totalSlots: e.target.value})} />
                 </div>
+                
+                {/* Rules Field */}
+                <div>
+                    <label className="block text-slate-400 text-xs font-bold mb-2">Tournament Rules</label>
+                    <textarea 
+                        className="w-full bg-slate-900/50 border border-slate-700 rounded-xl px-4 py-3 text-white focus:border-cyan-500 outline-none text-sm h-24 resize-none custom-scrollbar" 
+                        placeholder="Enter rules here..." 
+                        value={formData.rules} 
+                        onChange={e => setFormData({...formData, rules: e.target.value})} 
+                    />
+                </div>
+
                 <button disabled={loading} className="w-full bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold py-3 md:py-4 rounded-xl transition-all shadow-lg shadow-cyan-500/20 flex justify-center text-sm md:text-base">{loading ? 'Launching...' : 'Launch Tournament'}</button>
               </form>
             </div>
@@ -511,6 +622,8 @@
           const [resultModal, setResultModal] = useState(false);
           const [room, setRoom] = useState({ id: data.roomId || '', pass: data.roomPassword || '' });
           const [winner, setWinner] = useState(data.winner || '');
+          const [isEditingDetails, setIsEditingDetails] = useState(false);
+          const [editForm, setEditForm] = useState({});
 
           useEffect(() => { if (data.winner) setWinner(data.winner); }, [data.winner]);
 
@@ -525,6 +638,85 @@
           const deleteT = async () => { if(confirm("Delete tournament?")) { const docRef = getTournamentDoc(data.id); if(docRef) await deleteDoc(docRef); } };
           
           const slotsLeft = Math.max(0, data.totalSlots - (data.filledSlots || 0));
+          
+          const startEditingDetails = () => {
+            // Extract date and time from ISO string
+            const dateObj = new Date(data.dateTime);
+            const dateStr = dateObj.toISOString().split('T')[0];
+            const timeStr = dateObj.toTimeString().slice(0, 5);
+            
+            setEditForm({
+                title: data.title,
+                game: data.game,
+                map: data.map,
+                entryFee: data.entryFee,
+                prizePool: data.prizePool,
+                totalSlots: data.totalSlots,
+                rules: data.rules || DEFAULT_RULES, // Load existing rules or default
+                date: dateStr,
+                time: timeStr
+            });
+            setIsEditingDetails(true);
+          };
+
+          const handleSaveDetails = async (e) => {
+              e.preventDefault();
+              try {
+                  const dateTime = new Date(`${editForm.date}T${editForm.time}`);
+                  if (isNaN(dateTime.getTime())) throw new Error("Invalid Date/Time");
+                  
+                  const docRef = getTournamentDoc(data.id);
+                  await updateDoc(docRef, {
+                      title: editForm.title,
+                      game: editForm.game,
+                      map: editForm.map,
+                      entryFee: Number(editForm.entryFee),
+                      prizePool: Number(editForm.prizePool),
+                      totalSlots: Number(editForm.totalSlots),
+                      rules: editForm.rules, // Save updated rules
+                      dateTime: dateTime.toISOString()
+                  });
+                  setIsEditingDetails(false);
+                  showNotification("Tournament Updated Successfully");
+              } catch(e) {
+                  console.error(e);
+                  alert(e.message);
+              }
+          };
+
+          if (isEditingDetails) {
+             return (
+                 <div className="glass-card rounded-2xl p-6 bg-slate-900/90 border border-blue-500/30">
+                     <h4 className="text-white font-bold mb-4 flex items-center gap-2"><Pencil size={16} /> Edit Tournament</h4>
+                     <form onSubmit={handleSaveDetails} className="space-y-4">
+                        <input className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-white text-sm" value={editForm.title} onChange={e=>setEditForm({...editForm, title:e.target.value})} placeholder="Title" required/>
+                        <div className="grid grid-cols-2 gap-2">
+                            <input className="bg-slate-800 border border-slate-600 rounded p-2 text-white text-sm" value={editForm.date} onChange={e=>setEditForm({...editForm, date:e.target.value})} type="date" required/>
+                            <input className="bg-slate-800 border border-slate-600 rounded p-2 text-white text-sm" value={editForm.time} onChange={e=>setEditForm({...editForm, time:e.target.value})} type="time" required/>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2">
+                            <input className="bg-slate-800 border border-slate-600 rounded p-2 text-white text-sm" value={editForm.entryFee} onChange={e=>setEditForm({...editForm, entryFee:e.target.value})} type="number" placeholder="Fee" required/>
+                            <input className="bg-slate-800 border border-slate-600 rounded p-2 text-white text-sm" value={editForm.prizePool} onChange={e=>setEditForm({...editForm, prizePool:e.target.value})} type="number" placeholder="Prize" required/>
+                             <input className="bg-slate-800 border border-slate-600 rounded p-2 text-white text-sm" value={editForm.totalSlots} onChange={e=>setEditForm({...editForm, totalSlots:e.target.value})} type="number" placeholder="Slots" required/>
+                        </div>
+                        <input className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-white text-sm" value={editForm.map} onChange={e=>setEditForm({...editForm, map:e.target.value})} placeholder="Map" required/>
+                        
+                        {/* Edit Rules */}
+                        <textarea 
+                            className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-white text-sm h-24 resize-none custom-scrollbar" 
+                            value={editForm.rules} 
+                            onChange={e=>setEditForm({...editForm, rules:e.target.value})} 
+                            placeholder="Rules" 
+                        />
+
+                        <div className="flex gap-2 justify-end pt-2">
+                            <button type="button" onClick={()=>setIsEditingDetails(false)} className="px-4 py-2 text-sm text-slate-400 hover:text-white">Cancel</button>
+                            <button type="submit" className="px-4 py-2 text-sm bg-blue-600 text-white rounded font-bold hover:bg-blue-500">Save Changes</button>
+                        </div>
+                     </form>
+                 </div>
+             );
+          }
 
           return (
             <div className={`glass-card rounded-2xl overflow-hidden ${data.status === 'completed' ? 'opacity-60 grayscale-[0.5]' : ''}`}>
@@ -535,9 +727,13 @@
                     <span className="text-[10px] font-bold bg-indigo-500/20 text-indigo-300 px-2 py-1 rounded uppercase">{data.format}</span>
                     {!data.registrationOpen && data.status !== 'completed' && <span className="text-[10px] font-bold bg-red-500/20 text-red-400 px-2 py-1 rounded uppercase flex items-center gap-1"><Pause size={10}/> Paused</span>}
                   </div>
-                  <h3 className="text-lg md:text-xl font-bold text-white mb-2">{data.title}</h3>
+                  <h3 className="text-lg md:text-xl font-bold text-white mb-2 flex items-center gap-2">
+                      {data.title}
+                      <button onClick={startEditingDetails} className="text-slate-500 hover:text-blue-400 transition-colors"><Pencil size={14}/></button>
+                  </h3>
                   <div className="text-xs md:text-sm text-slate-400 flex flex-wrap gap-4">
-                    <span className="flex gap-1"><Calendar size={14}/> {new Date(data.dateTime).toLocaleDateString()}</span><span className="text-emerald-400">Prize: ₹{data.prizePool}</span>
+                    <span className="flex gap-1"><Calendar size={14}/> {formatDate(data.dateTime)} • {formatTime(data.dateTime)}</span>
+                    <span className="text-emerald-400">Prize: ₹{data.prizePool}</span>
                     <span className={`flex gap-1 items-center font-bold ${slotsLeft === 0 ? 'text-red-400' : 'text-cyan-400'}`}><Users size={14}/> {data.filledSlots || 0}/{data.totalSlots} Filled</span>
                   </div>
                   {data.winner && <div className="mt-4 bg-yellow-500/10 text-yellow-400 p-2 rounded w-fit text-sm font-bold">WINNER: {data.winner}</div>}
@@ -610,7 +806,7 @@
                     <div className="p-4 md:p-5 flex-1 flex flex-col gap-3 md:gap-4 text-xs text-slate-300">
                         {activeTab === 'overview' && (
                             <div className="animate-fade-in space-y-4">
-                                <div className="grid grid-cols-2 gap-2 md:gap-3"><div className="bg-slate-900/40 p-2 rounded"><Calendar size={12}/> {new Date(t.dateTime).toLocaleDateString()}</div><div className="bg-slate-900/40 p-2 rounded flex gap-1"><Timer size={12}/> <CountdownTimer targetDate={t.dateTime}/></div></div>
+                                <div className="grid grid-cols-2 gap-2 md:gap-3"><div className="bg-slate-900/40 p-2 rounded"><Calendar size={12}/> {formatDate(t.dateTime)} • {formatTime(t.dateTime)}</div><div className="bg-slate-900/40 p-2 rounded flex gap-1"><Timer size={12}/> <CountdownTimer targetDate={t.dateTime}/></div></div>
                                 <div>
                                     <div className="flex justify-between text-[10px] font-bold mb-1.5"><span className="text-slate-500 uppercase">Registration</span><span className={isFull ? "text-red-400 animate-pulse" : "text-cyan-400"}>{slotsLeft} Slots Left</span></div>
                                     <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden"><div className={`h-full transition-all duration-500 ${isFull ? 'bg-red-500' : 'bg-gradient-to-r from-cyan-500 to-blue-500'}`} style={{ width: `${percentFilled}%` }}></div></div>
@@ -637,23 +833,31 @@
 
                         {activeTab === 'prizes' && (
                             <div className="animate-fade-in space-y-2">
-                                <div className="flex justify-between p-2 bg-yellow-500/10 rounded border border-yellow-500/20"><span className="font-bold text-yellow-400">#1 Winner</span><span className="font-black text-white">₹{Math.floor(t.prizePool * 0.6)}</span></div>
-                                <div className="flex justify-between p-2 bg-slate-800/30 rounded"><span className="font-bold text-slate-400">#2 Runner Up</span><span className="font-bold text-slate-300">₹{Math.floor(t.prizePool * 0.3)}</span></div>
-                                <div className="flex justify-between p-2 bg-slate-800/30 rounded"><span className="font-bold text-slate-400">#3 Third</span><span className="font-bold text-slate-300">₹{Math.floor(t.prizePool * 0.1)}</span></div>
+                                <div className="flex justify-between p-3 bg-yellow-500/10 rounded border border-yellow-500/20 items-center">
+                                    <span className="font-bold text-yellow-400 flex items-center gap-2"><Trophy size={18}/> Winner Takes All</span>
+                                    <span className="font-black text-white text-lg">₹{t.prizePool}</span>
+                                </div>
                                 <div className="text-[10px] text-slate-500 text-center mt-2">*Per Kill: ₹0 (Standard)</div>
                             </div>
                         )}
 
                         {activeTab === 'rules' && (
                             <div className="animate-fade-in space-y-2 text-[10px] text-slate-400 leading-relaxed">
-                                <p>1. Teaming with other squads results in immediate DQ.</p>
-                                <p>2. Hackers will be permanently banned.</p>
-                                <p>3. Room ID/Pass shared 10 mins before start.</p>
-                                <p>4. Screenshot your result for disputes.</p>
-                                <div className="bg-slate-800 p-2 rounded mt-2">
-                                    <div className="font-bold text-slate-300 mb-1">Points System</div>
-                                    <div className="grid grid-cols-2 gap-2"><span>Booyah: 12pts</span><span>2nd: 9pts</span><span>Kill: 1pt</span></div>
-                                </div>
+                                {/* Display Dynamic Rules if available, else default */}
+                                {t.rules ? (
+                                    <div className="whitespace-pre-wrap">{t.rules}</div>
+                                ) : (
+                                    <>
+                                        <p>1. Teaming with other squads results in immediate DQ.</p>
+                                        <p>2. Hackers will be permanently banned.</p>
+                                        <p>3. Room ID/Pass shared 10 mins before start.</p>
+                                        <p>4. Screenshot your result for disputes.</p>
+                                        <div className="bg-slate-800 p-2 rounded mt-2">
+                                            <div className="font-bold text-slate-300 mb-1">Points System</div>
+                                            <div className="grid grid-cols-2 gap-2"><span>Booyah: 12pts</span><span>2nd: 9pts</span><span>Kill: 1pt</span></div>
+                                        </div>
+                                    </>
+                                )}
                             </div>
                         )}
 
@@ -700,6 +904,9 @@
                 <div className="flex bg-slate-900/80 p-1 rounded-xl border border-slate-800 w-full md:w-auto overflow-x-auto">
                     <button onClick={()=>setView('home')} className={`flex-1 md:flex-none px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap ${view==='home'?'bg-cyan-600 text-white':'text-slate-400'}`}>Events</button>
                     <button onClick={()=>setView('profile')} className={`flex-1 md:flex-none px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap ${view==='profile'?'bg-cyan-600 text-white':'text-slate-400'}`}>Profile</button>
+                    <a href="https://www.instagram.com/rings.of.fire.offical?igsh=MXBtY3hjbGFob3BicQ==" target="_blank" rel="noreferrer" className="flex-1 md:flex-none px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap text-slate-400 hover:text-pink-500 flex items-center gap-2 transition-colors">
+                        <Instagram size={16}/> Contact
+                    </a>
                 </div>
               </div>
               {view === 'profile' ? <PlayerProfile userId={userId} tournaments={tournaments} /> : (
@@ -791,7 +998,6 @@
                         }) 
                     }); 
                 }
-                // Success state immediately (removed timeout)
                 setStep(3); 
                 showNotification("Request Submitted");
               } catch(e) { 
@@ -808,7 +1014,6 @@
           return (
             <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-xl animate-fade-in">
               <div className="glass-panel rounded-3xl w-full max-w-lg border border-slate-700 shadow-2xl overflow-hidden relative h-[85vh] max-h-[800px] flex flex-col">
-                {/* Hide close button on step 3 to encourage reading the message */}
                 {step !== 3 && <button onClick={onClose} className="absolute top-4 right-4 text-slate-400 hover:text-white z-10"><X size={24}/></button>}
                 
                 {step === 1 ? (
